@@ -319,3 +319,151 @@ def visualize_outliers_teams(teams_df):
             plt.show()
     
     print(f"✓ Visualizations complete")
+
+def detect_outliers_zscore_players_teams(players_teams_df, threshold=3):
+    """Detect outliers in players_teams dataset using Z-score method."""
+    # Select key performance statistics
+    performance_cols = ['points', 'rebounds', 'assists', 'steals', 'blocks', 'minutes',
+                       'fgAttempted', 'fgMade', 'ftAttempted', 'ftMade', 'turnovers']
+    
+    # Filter to only existing columns
+    numerical_cols = [col for col in performance_cols if col in players_teams_df.columns]
+    df_valid = players_teams_df[numerical_cols].dropna()
+    
+    if len(df_valid) == 0:
+        print("No valid numeric data to analyze")
+        return pd.DataFrame()
+    
+    # Calculate Z-scores
+    z_scores = np.abs(stats.zscore(df_valid))
+    
+    # Find outliers (where any column has |z| > threshold)
+    outlier_mask = (z_scores > threshold).any(axis=1)
+    outliers = players_teams_df.loc[df_valid[outlier_mask].index]
+    
+    print(f"Z-Score Method (threshold={threshold}):")
+    print(f"Total outliers detected: {len(outliers)}")
+    print(f"Percentage of dataset: {len(outliers)/len(players_teams_df)*100:.2f}%\n")
+    
+    if len(outliers) > 0:
+        print("Sample Outliers:")
+        display_cols = ['playerID', 'year', 'tmID', 'GP', 'points', 'rebounds', 'assists']
+        display_cols = [col for col in display_cols if col in outliers.columns]
+        display(outliers[display_cols].head(10))
+        
+        # Show which columns have outliers
+        outlier_counts = (z_scores > threshold).sum(axis=0)
+        outlier_counts_series = pd.Series(outlier_counts, index=numerical_cols)
+        outlier_cols = outlier_counts_series[outlier_counts_series > 0].sort_values(ascending=False)
+        print(f"\nColumns with outliers (count):")
+        print(outlier_cols.head(10))
+    
+    return outliers
+
+
+def detect_outliers_iqr_players_teams(players_teams_df, multiplier=1.5):
+    """Detect outliers in players_teams dataset using IQR method."""
+    performance_cols = ['points', 'rebounds', 'assists', 'steals', 'blocks', 'minutes',
+                       'fgAttempted', 'fgMade', 'ftAttempted', 'ftMade', 'turnovers']
+    
+    numerical_cols = [col for col in performance_cols if col in players_teams_df.columns]
+    df_valid = players_teams_df[numerical_cols].dropna()
+    
+    if len(df_valid) == 0:
+        print("No valid numeric data to analyze")
+        return pd.DataFrame()
+    
+    outlier_indices = set()
+    outlier_col_counts = {}
+    
+    for col in numerical_cols:
+        Q1 = df_valid[col].quantile(0.25)
+        Q3 = df_valid[col].quantile(0.75)
+        IQR = Q3 - Q1
+        
+        lower_bound = Q1 - multiplier * IQR
+        upper_bound = Q3 + multiplier * IQR
+        
+        col_outliers = df_valid[(df_valid[col] < lower_bound) | (df_valid[col] > upper_bound)]
+        if len(col_outliers) > 0:
+            outlier_indices.update(col_outliers.index)
+            outlier_col_counts[col] = len(col_outliers)
+    
+    outliers = players_teams_df.loc[list(outlier_indices)]
+    
+    print(f"IQR Method (multiplier={multiplier}):")
+    print(f"Total unique outliers detected: {len(outliers)}")
+    print(f"Percentage of dataset: {len(outliers)/len(players_teams_df)*100:.2f}%\n")
+    
+    if len(outliers) > 0:
+        print("Columns with most outliers:")
+        for col, count in sorted(outlier_col_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
+            print(f"  {col}: {count}")
+        
+        print("\nSample Outliers:")
+        display_cols = ['playerID', 'year', 'tmID', 'GP', 'points', 'rebounds', 'assists']
+        display_cols = [col for col in display_cols if col in outliers.columns]
+        display(outliers[display_cols].head(10))
+    
+    return outliers
+
+
+def visualize_outliers_players_teams(players_teams_df):
+    """Visualize outliers in players_teams dataset."""
+    # Select key stats for visualization
+    key_cols = ['points', 'rebounds', 'assists', 'steals', 'blocks', 'minutes']
+    viz_cols = [col for col in key_cols if col in players_teams_df.columns][:4]
+    
+    if len(viz_cols) == 0:
+        print("No suitable numeric columns for visualization")
+        return
+    
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes = axes.flatten()
+    
+    for idx, col in enumerate(viz_cols):
+        df_valid = players_teams_df[col].dropna()
+        
+        if len(df_valid) == 0:
+            continue
+        
+        # Box plot
+        axes[idx].boxplot(df_valid, vert=True)
+        axes[idx].set_ylabel(col)
+        axes[idx].set_title(f'{col} Distribution - Box Plot')
+        axes[idx].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Scatter plot: Points vs Minutes (if both exist)
+    if 'points' in players_teams_df.columns and 'minutes' in players_teams_df.columns:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        df_valid = players_teams_df[['points', 'minutes']].dropna()
+        
+        if len(df_valid) > 0:
+            # Calculate outliers using Z-score
+            z_scores = np.abs(stats.zscore(df_valid))
+            outlier_mask = (z_scores > 3).any(axis=1)
+            
+            # Plot normal points
+            ax.scatter(df_valid[~outlier_mask]['minutes'], 
+                       df_valid[~outlier_mask]['points'],
+                       alpha=0.5, s=30, c='blue', label='Normal')
+            
+            # Plot outliers
+            if outlier_mask.sum() > 0:
+                ax.scatter(df_valid[outlier_mask]['minutes'], 
+                           df_valid[outlier_mask]['points'],
+                           alpha=0.8, s=100, c='red', marker='x', label='Outliers (Z>3)')
+            
+            ax.set_xlabel('Minutes Played')
+            ax.set_ylabel('Points')
+            ax.set_title('Points vs Minutes - Outlier Detection')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.show()
+    
+    print(f"✓ Visualizations complete")

@@ -2,6 +2,7 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import classification_report, mean_absolute_error, r2_score
 import pandas as pd
+import numpy as np
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -520,3 +521,195 @@ def impute_missing_data_teams(teams_df):
     print("=" * 60)
     
     return teams_df
+
+def impute_missing_data_players_teams(players_teams_df):
+    
+    print("=== ADVANCED MISSING DATA IMPUTATION - PLAYERS_TEAMS ===\n")
+    print("Using ML-based imputation with proper experimental setup\n")
+
+    # Create a copy to work with
+    df = players_teams_df.copy()
+    
+    # Initial statistics
+    print("Initial Missing Data Summary:")
+    missing_summary = df.isnull().sum()
+    missing_summary = missing_summary[missing_summary > 0].sort_values(ascending=False)
+    if len(missing_summary) > 0:
+        print(missing_summary)
+    else:
+        print("  No missing values detected!")
+    print()
+
+    # Define key statistics columns for imputation
+    regular_season_stats = ['GP', 'GS', 'minutes', 'points', 'rebounds', 'assists', 
+                           'steals', 'blocks', 'turnovers', 'fgAttempted', 'fgMade',
+                           'ftAttempted', 'ftMade', 'threeAttempted', 'threeMade']
+    
+    playoff_stats = ['PostGP', 'PostGS', 'PostMinutes', 'PostPoints', 'PostRebounds',
+                    'PostAssists', 'PostSteals', 'PostBlocks', 'PostTurnovers',
+                    'PostfgAttempted', 'PostfgMade', 'PostftAttempted', 'PostftMade',
+                    'PostthreeAttempted', 'PostthreeMade']
+
+    # ==========================================
+    # STEP 1: Handle Missing Regular Season Stats
+    # ==========================================
+    print("=" * 60)
+    print("STEP 1: Regular Season Statistics Imputation")
+    print("=" * 60)
+    
+    # For players with partial data, use correlated statistics to predict missing values
+    # Strategy: Use available stats + year to predict missing stats
+    
+    stats_to_impute = []
+    for col in regular_season_stats:
+        if col in df.columns and df[col].isna().sum() > 0:
+            stats_to_impute.append(col)
+    
+    if len(stats_to_impute) > 0:
+        print(f"\nStats requiring imputation: {stats_to_impute}")
+        
+        for stat in stats_to_impute:
+            print(f"\nImputing {stat}...")
+            
+            # Get rows with valid values for this stat
+            valid_data = df[df[stat].notna()].copy()
+            missing_data = df[df[stat].isna()].copy()
+            
+            if len(missing_data) == 0:
+                continue
+                
+            # Select predictor features (other stats that are available)
+            predictor_cols = ['year', 'GP']
+            for potential_col in regular_season_stats:
+                if potential_col != stat and potential_col in df.columns:
+                    predictor_cols.append(potential_col)
+            
+            # Prepare training data (only use rows with all predictors available)
+            X_train_data = valid_data[predictor_cols].dropna()
+            y_train_data = valid_data.loc[X_train_data.index, stat]
+            
+            if len(X_train_data) < 10:  # Not enough data for ML
+                # Fall back to simple mean imputation
+                mean_val = df[stat].mean()
+                df.loc[df[stat].isna(), stat] = mean_val
+                print(f"  Used mean imputation (insufficient data): {mean_val:.2f}")
+                continue
+            
+            # Train-test split for evaluation
+            X_train, X_test, y_train, y_test = train_test_split(
+                X_train_data, y_train_data, test_size=0.2, random_state=42
+            )
+            
+            # Train Random Forest
+            rf_model = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=10,
+                min_samples_split=5,
+                random_state=42,
+                n_jobs=-1
+            )
+            rf_model.fit(X_train, y_train)
+            
+            # Evaluate
+            y_pred_test = rf_model.predict(X_test)
+            mae = mean_absolute_error(y_test, y_pred_test)
+            r2 = r2_score(y_test, y_pred_test)
+            
+            print(f"  Model Performance: MAE={mae:.2f}, R²={r2:.4f}")
+            
+            # Retrain on full data
+            rf_model.fit(X_train_data, y_train_data)
+            
+            # Predict missing values
+            X_missing = missing_data[predictor_cols].dropna()
+            if len(X_missing) > 0:
+                predictions = rf_model.predict(X_missing)
+                # Ensure non-negative predictions for counting stats
+                predictions = np.maximum(predictions, 0)
+                df.loc[X_missing.index, stat] = predictions
+                print(f"  Imputed {len(X_missing)} missing values")
+    else:
+        print("  No missing regular season statistics!")
+
+    # ==========================================
+    # STEP 2: Handle Missing Playoff Stats
+    # ==========================================
+    print("\n" + "=" * 60)
+    print("STEP 2: Playoff Statistics Imputation")
+    print("=" * 60)
+    
+    # For playoff stats, many NaNs are legitimate (player didn't make playoffs)
+    # Only impute if we're certain the player made playoffs
+    
+    playoff_stats_to_impute = []
+    for col in playoff_stats:
+        if col in df.columns and df[col].isna().sum() > 0:
+            playoff_stats_to_impute.append(col)
+    
+    if len(playoff_stats_to_impute) > 0:
+        print(f"\nPlayoff stats with missing values: {len(playoff_stats_to_impute)}")
+        print("Strategy: Fill with 0 (assuming no playoff participation)")
+        
+        for col in playoff_stats_to_impute:
+            missing_count = df[col].isna().sum()
+            df[col].fillna(0, inplace=True)
+            print(f"  {col}: Filled {missing_count} missing values with 0")
+    else:
+        print("  No missing playoff statistics!")
+
+    # ==========================================
+    # STEP 3: Handle Other Missing Values
+    # ==========================================
+    print("\n" + "=" * 60)
+    print("STEP 3: Other Missing Values")
+    print("=" * 60)
+    
+    # Check for any remaining missing values
+    remaining_missing = df.isnull().sum()
+    remaining_missing = remaining_missing[remaining_missing > 0]
+    
+    if len(remaining_missing) > 0:
+        print("\nRemaining missing values:")
+        print(remaining_missing)
+        
+        # Handle specific columns
+        if 'GS' in remaining_missing.index:
+            # Games started: use median based on GP
+            print("\nImputing GS (Games Started) based on GP...")
+            df['GS'].fillna(df['GP'] * 0.5, inplace=True)  # Assume ~50% starting
+        
+        if 'stint' in remaining_missing.index:
+            # Stint usually 0 for single team, 1+ for trades
+            print("Imputing stint with 0 (no trade)...")
+            df['stint'].fillna(0, inplace=True)
+    else:
+        print("  No remaining missing values!")
+
+    # ==========================================
+    # Final Summary
+    # ==========================================
+    print("\n" + "=" * 60)
+    print("IMPUTATION SUMMARY")
+    print("=" * 60)
+    
+    print("\nFinal Missing Data Summary:")
+    final_missing = df.isnull().sum()
+    final_missing = final_missing[final_missing > 0]
+    if len(final_missing) > 0:
+        print(final_missing)
+    else:
+        print("  ✓ All missing values have been imputed!")
+    
+    print("\nKey Statistics After Imputation:")
+    if 'points' in df.columns:
+        print(f"  Points - Mean: {df['points'].mean():.2f}, Std: {df['points'].std():.2f}")
+    if 'rebounds' in df.columns:
+        print(f"  Rebounds - Mean: {df['rebounds'].mean():.2f}, Std: {df['rebounds'].std():.2f}")
+    if 'assists' in df.columns:
+        print(f"  Assists - Mean: {df['assists'].mean():.2f}, Std: {df['assists'].std():.2f}")
+    
+    print("\n" + "=" * 60)
+    print("✓ ADVANCED IMPUTATION COMPLETE - PLAYERS_TEAMS")
+    print("=" * 60)
+    
+    return df
