@@ -167,3 +167,181 @@ def visualize_outliers(players_df):
     plt.show()
     
     print(f"✓ Visualizations complete")
+
+# ==========================================
+# TEAMS DATASET OUTLIER DETECTION
+# ==========================================
+
+def detect_outliers_zscore_teams(teams_df, threshold=3):
+    """
+    Detect outliers in teams dataset using Z-Score method
+    
+    Parameters:
+    - teams_df: DataFrame with team data
+    - threshold: Z-score threshold (default=3)
+    
+    Returns:
+    - DataFrame with outliers
+    """
+    # Select only numeric columns
+    numerical_cols = teams_df.select_dtypes(include=['number']).columns.tolist()
+    df_valid = teams_df[numerical_cols].dropna()
+    
+    if len(df_valid) == 0:
+        print("No valid numeric data to analyze")
+        return pd.DataFrame()
+    
+    # Calculate Z-scores
+    z_scores = np.abs(stats.zscore(df_valid))
+    
+    # Find outliers (where any column has |z| > threshold)
+    outlier_mask = (z_scores > threshold).any(axis=1)
+    outliers = teams_df.loc[df_valid[outlier_mask].index]
+    
+    print(f"Z-Score Method (threshold={threshold}):")
+    print(f"Total outliers detected: {len(outliers)}")
+    print(f"Percentage of dataset: {len(outliers)/len(teams_df)*100:.2f}%\n")
+    
+    if len(outliers) > 0:
+        print("Sample Outliers:")
+        display_cols = ['year', 'tmID', 'name', 'won', 'lost', 'attend'] if all(c in outliers.columns for c in ['year', 'tmID', 'name', 'won', 'lost', 'attend']) else outliers.columns[:6]
+        display(outliers[display_cols].head(10))
+        
+        # Show which columns have outliers
+        outlier_counts = (z_scores > threshold).sum(axis=0)
+        outlier_counts_series = pd.Series(outlier_counts, index=numerical_cols)
+        outlier_cols = outlier_counts_series[outlier_counts_series > 0].sort_values(ascending=False)
+        print(f"\nColumns with outliers (count):")
+        print(outlier_cols.head(10))
+    
+    return outliers
+
+
+def detect_outliers_iqr_teams(teams_df, multiplier=1.5):
+    """
+    Detect outliers in teams dataset using Interquartile Range (IQR) method
+    
+    Parameters:
+    - teams_df: DataFrame with team data
+    - multiplier: IQR multiplier (default=1.5)
+    
+    Returns:
+    - DataFrame with outliers
+    """
+    numerical_cols = teams_df.select_dtypes(include=['number']).columns.tolist()
+    df_valid = teams_df[numerical_cols].dropna()
+    
+    if len(df_valid) == 0:
+        print("No valid numeric data to analyze")
+        return pd.DataFrame()
+    
+    outlier_indices = set()
+    outlier_col_counts = {}
+    
+    for col in numerical_cols:
+        Q1 = df_valid[col].quantile(0.25)
+        Q3 = df_valid[col].quantile(0.75)
+        IQR = Q3 - Q1
+        
+        lower_bound = Q1 - multiplier * IQR
+        upper_bound = Q3 + multiplier * IQR
+        
+        col_outliers = df_valid[(df_valid[col] < lower_bound) | (df_valid[col] > upper_bound)]
+        if len(col_outliers) > 0:
+            outlier_indices.update(col_outliers.index)
+            outlier_col_counts[col] = len(col_outliers)
+    
+    outliers = teams_df.loc[list(outlier_indices)]
+    
+    print(f"IQR Method (multiplier={multiplier}):")
+    print(f"Total unique outliers detected: {len(outliers)}")
+    print(f"Percentage of dataset: {len(outliers)/len(teams_df)*100:.2f}%\n")
+    
+    if len(outliers) > 0:
+        print("Columns with most outliers:")
+        for col, count in sorted(outlier_col_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
+            print(f"  {col}: {count}")
+        
+        print("\nSample Outliers:")
+        display_cols = ['year', 'tmID', 'name', 'won', 'lost', 'attend'] if all(c in outliers.columns for c in ['year', 'tmID', 'name', 'won', 'lost', 'attend']) else outliers.columns[:6]
+        display(outliers[display_cols].head(10))
+    
+    return outliers
+
+
+def visualize_outliers_teams(teams_df):
+    """
+    Create visualizations for outlier detection in teams dataset
+    
+    Parameters:
+    - teams_df: DataFrame with team data
+    """
+    # Select key numeric columns for visualization
+    key_cols = []
+    potential_cols = ['won', 'lost', 'attend', 'o_pts', 'd_pts', 'o_reb', 'd_reb']
+    
+    for col in potential_cols:
+        if col in teams_df.columns:
+            key_cols.append(col)
+    
+    if len(key_cols) == 0:
+        print("No suitable numeric columns for visualization")
+        return
+    
+    # Limit to first 4 columns for visualization
+    viz_cols = key_cols[:4]
+    
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes = axes.flatten()
+    
+    for idx, col in enumerate(viz_cols):
+        df_valid = teams_df[col].dropna()
+        
+        if len(df_valid) == 0:
+            continue
+        
+        # Calculate Z-scores
+        z_scores = np.abs(stats.zscore(df_valid))
+        mean_val = df_valid.mean()
+        std_val = df_valid.std()
+        
+        # Box plot
+        axes[idx].boxplot(df_valid, vert=True)
+        axes[idx].set_ylabel(col)
+        axes[idx].set_title(f'{col} Distribution - Box Plot')
+        axes[idx].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Scatter plot: Wins vs Attendance (if both exist)
+    if 'won' in teams_df.columns and 'attend' in teams_df.columns:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        df_valid = teams_df[['won', 'attend']].dropna()
+        
+        if len(df_valid) > 0:
+            # Calculate outliers using Z-score
+            z_scores = np.abs(stats.zscore(df_valid))
+            outlier_mask = (z_scores > 3).any(axis=1)
+            
+            # Plot normal points
+            ax.scatter(df_valid[~outlier_mask]['won'], 
+                       df_valid[~outlier_mask]['attend'],
+                       alpha=0.5, s=50, c='blue', label='Normal')
+            
+            # Plot outliers
+            if outlier_mask.sum() > 0:
+                ax.scatter(df_valid[outlier_mask]['won'], 
+                           df_valid[outlier_mask]['attend'],
+                           alpha=0.8, s=150, c='red', marker='x', label='Outliers (Z>3)')
+            
+            ax.set_xlabel('Wins')
+            ax.set_ylabel('Attendance')
+            ax.set_title('Wins vs Attendance - Outlier Detection')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.show()
+    
+    print(f"✓ Visualizations complete")

@@ -311,3 +311,212 @@ def impute_missing_data(players_df):
     print("=" * 60)
     
     return players_df
+
+
+def impute_missing_data_teams(teams_df):
+    
+    print("=== ADVANCED MISSING DATA IMPUTATION - TEAMS ===\n")
+    print("Using statistical and ML-based imputation with proper experimental setup\n")
+
+    # Initial statistics
+    print("Initial Missing Data Summary:")
+    print(f"  Missing attend values: {teams_df['attend'].isna().sum()}")
+    print(f"  Zero attend values: {(teams_df['attend'] == 0).sum()}")
+    
+    # Check if divID and confID exist (may have been dropped earlier)
+    if 'divID' in teams_df.columns:
+        print(f"  Empty divID: {(teams_df['divID'] == '').sum()}")
+    if 'confID' in teams_df.columns:
+        print(f"  Empty confID: {(teams_df['confID'] == '').sum()}")
+    print()
+
+    # ==========================================
+    # STEP 1: Attendance Imputation
+    # ==========================================
+    print("=" * 60)
+    print("STEP 1: Attendance Imputation (Random Forest Regression)")
+    print("=" * 60)
+    
+    # Create features for attendance prediction
+    # Use team performance stats, year, playoff status, etc.
+    
+    teams_with_attend = teams_df[(teams_df['attend'].notna()) & (teams_df['attend'] > 0)].copy()
+    teams_missing_attend = teams_df[(teams_df['attend'].isna()) | (teams_df['attend'] == 0)].copy()
+    
+    if len(teams_missing_attend) > 0:
+        print(f"\nTeams with missing/zero attendance: {len(teams_missing_attend)}")
+        
+        # Select relevant features for prediction
+        feature_cols = ['year', 'won', 'lost', 'rank', 'o_pts', 'd_pts', 'homeW', 'awayW']
+        
+        # Prepare features - encode playoff status
+        X_attend = teams_with_attend[feature_cols].copy()
+        X_attend['made_playoffs'] = (teams_with_attend['playoff'] == 'Y').astype(int)
+        
+        y_attend = teams_with_attend['attend']
+        
+        # Train-test split for evaluation
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_attend, y_attend, test_size=0.2, random_state=42
+        )
+        
+        # Train Random Forest Regressor
+        rf_regressor_attend = RandomForestRegressor(
+            n_estimators=150,
+            max_depth=12,
+            min_samples_split=5,
+            random_state=42
+        )
+        rf_regressor_attend.fit(X_train, y_train)
+        
+        # Evaluate on test set
+        y_pred_test = rf_regressor_attend.predict(X_test)
+        mae = mean_absolute_error(y_test, y_pred_test)
+        r2 = r2_score(y_test, y_pred_test)
+        
+        print("\nModel Performance on Test Set:")
+        print(f"  Mean Absolute Error: {mae:.0f} attendees")
+        print(f"  R² Score: {r2:.4f}")
+        
+        # Cross-validation
+        cv_scores = cross_val_score(rf_regressor_attend, X_attend, y_attend, 
+                                    cv=5, scoring='neg_mean_absolute_error')
+        print(f"  5-Fold CV MAE: {-cv_scores.mean():.0f} (+/- {cv_scores.std() * 2:.0f})")
+        
+        # Feature importance
+        feature_importance = pd.DataFrame({
+            'feature': X_attend.columns,
+            'importance': rf_regressor_attend.feature_importances_
+        }).sort_values('importance', ascending=False)
+        print("\nTop Feature Importances:")
+        print(feature_importance.head(5).to_string(index=False))
+        
+        # Retrain on full data
+        rf_regressor_attend.fit(X_attend, y_attend)
+        
+        # Predict missing attendance
+        X_missing_attend = teams_missing_attend[feature_cols].copy()
+        X_missing_attend['made_playoffs'] = (teams_missing_attend['playoff'] == 'Y').astype(int)
+        
+        predicted_attend = rf_regressor_attend.predict(X_missing_attend)
+        teams_df.loc[teams_missing_attend.index, 'attend'] = predicted_attend.round(0).astype(int)
+        
+        print(f"\n✓ Predicted attendance for {len(teams_missing_attend)} teams")
+        print(f"  Predicted attendance range: {predicted_attend.min():.0f} - {predicted_attend.max():.0f}")
+    else:
+        print("\nNo missing attendance to impute")
+
+    # ==========================================
+    # STEP 2: Conference/Division Handling
+    # ==========================================
+    print("\n" + "=" * 60)
+    print("STEP 2: Conference and Division ID Handling")
+    print("=" * 60)
+    
+    # Check if these columns exist (they may have been dropped earlier in the notebook)
+    has_divid = 'divID' in teams_df.columns
+    has_confid = 'confID' in teams_df.columns
+    
+    if not has_divid and not has_confid:
+        print("\n✓ divID and confID columns not present (may have been dropped)")
+        print("  Skipping conference/division handling")
+    else:
+        # For confID and divID, use team and year context
+        # Fill empty divID with 'Unknown' or use team/year patterns
+        
+        if has_divid:
+            empty_divid = (teams_df['divID'] == '').sum()
+            
+            if empty_divid > 0:
+                # Fill empty divID based on team/year patterns
+                for tmID in teams_df['tmID'].unique():
+                    team_data = teams_df[teams_df['tmID'] == tmID]
+                    known_divs = team_data[team_data['divID'] != '']['divID'].unique()
+                    
+                    if len(known_divs) > 0:
+                        # Use the most common division for this team
+                        most_common_div = team_data[team_data['divID'] != '']['divID'].mode()
+                        if len(most_common_div) > 0:
+                            teams_df.loc[(teams_df['tmID'] == tmID) & (teams_df['divID'] == ''), 'divID'] = most_common_div[0]
+                
+                # Any remaining empty divIDs are filled with 'NA'
+                teams_df['divID'] = teams_df['divID'].replace('', 'NA')
+                print(f"\n✓ Filled {empty_divid} empty divID values (team-based patterns + NA fallback)")
+            else:
+                print("\n✓ No empty divID values to fill")
+        
+        if has_confid:
+            empty_confid = (teams_df['confID'] == '').sum()
+            
+            if empty_confid > 0:
+                # confID is more stable, use team-based imputation
+                for tmID in teams_df['tmID'].unique():
+                    team_data = teams_df[teams_df['tmID'] == tmID]
+                    known_confs = team_data[team_data['confID'] != '']['confID'].unique()
+                    
+                    if len(known_confs) > 0:
+                        most_common_conf = team_data[team_data['confID'] != '']['confID'].mode()
+                        if len(most_common_conf) > 0:
+                            teams_df.loc[(teams_df['tmID'] == tmID) & (teams_df['confID'] == ''), 'confID'] = most_common_conf[0]
+                
+                teams_df['confID'] = teams_df['confID'].replace('', 'NA')
+                print(f"✓ Filled {empty_confid} empty confID values (team-based patterns + NA fallback)")
+            else:
+                print("✓ No empty confID values to fill")
+
+    # ==========================================
+    # STEP 3: Playoff Round Data Handling
+    # ==========================================
+    print("\n" + "=" * 60)
+    print("STEP 3: Playoff Round Data Handling")
+    print("=" * 60)
+    
+    # Fill empty playoff round strings with "NA" for teams that didn't make playoffs
+    # or didn't advance to those rounds
+    playoff_cols = ['firstRound', 'semis', 'finals']
+    existing_playoff_cols = [col for col in playoff_cols if col in teams_df.columns]
+    
+    if not existing_playoff_cols:
+        print("\n✓ Playoff round columns not present (may have been dropped)")
+        print("  Skipping playoff round handling")
+    else:
+        for col in existing_playoff_cols:
+            empty_count = (teams_df[col] == '').sum()
+            na_count = teams_df[col].isna().sum()
+            
+            if empty_count > 0 or na_count > 0:
+                teams_df[col] = teams_df[col].replace('', 'NA').fillna('NA')
+                print(f"\n✓ Filled {col}: {empty_count} empty strings + {na_count} NaN values → 'NA'")
+        
+        print("\nThese categorical playoff outcomes cannot be reliably predicted,")
+        print("so 'NA' represents teams that didn't participate or didn't advance.")
+
+    # ==========================================
+    # FINAL VERIFICATION
+    # ==========================================
+    print("\n" + "=" * 60)
+    print("FINAL VERIFICATION")
+    print("=" * 60)
+
+    print("\nAfter Advanced Imputation:")
+    print(f"  Missing attend values: {teams_df['attend'].isna().sum()}")
+    print(f"  Zero attend values: {(teams_df['attend'] == 0).sum()}")
+    
+    if 'divID' in teams_df.columns:
+        print(f"  Empty divID: {(teams_df['divID'] == '').sum()}")
+    if 'confID' in teams_df.columns:
+        print(f"  Empty confID: {(teams_df['confID'] == '').sum()}")
+
+    print("\nAttendance statistics after imputation:")
+    print(teams_df['attend'].describe())
+
+    print("\nSanity Checks:")
+    print(f"  Min attendance: {teams_df['attend'].min():.0f} (expected: ~50,000-100,000)")
+    print(f"  Max attendance: {teams_df['attend'].max():.0f} (expected: ~150,000-200,000)")
+    print(f"  Mean attendance: {teams_df['attend'].mean():.0f}")
+
+    print("\n" + "=" * 60)
+    print("✓ ADVANCED IMPUTATION COMPLETE - TEAMS")
+    print("=" * 60)
+    
+    return teams_df
