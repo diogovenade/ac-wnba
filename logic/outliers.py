@@ -173,16 +173,6 @@ def visualize_outliers(players_df):
 # ==========================================
 
 def detect_outliers_zscore_teams(teams_df, threshold=3):
-    """
-    Detect outliers in teams dataset using Z-Score method
-    
-    Parameters:
-    - teams_df: DataFrame with team data
-    - threshold: Z-score threshold (default=3)
-    
-    Returns:
-    - DataFrame with outliers
-    """
     # Select only numeric columns
     numerical_cols = teams_df.select_dtypes(include=['number']).columns.tolist()
     df_valid = teams_df[numerical_cols].dropna()
@@ -218,16 +208,6 @@ def detect_outliers_zscore_teams(teams_df, threshold=3):
 
 
 def detect_outliers_iqr_teams(teams_df, multiplier=1.5):
-    """
-    Detect outliers in teams dataset using Interquartile Range (IQR) method
-    
-    Parameters:
-    - teams_df: DataFrame with team data
-    - multiplier: IQR multiplier (default=1.5)
-    
-    Returns:
-    - DataFrame with outliers
-    """
     numerical_cols = teams_df.select_dtypes(include=['number']).columns.tolist()
     df_valid = teams_df[numerical_cols].dropna()
     
@@ -270,12 +250,6 @@ def detect_outliers_iqr_teams(teams_df, multiplier=1.5):
 
 
 def visualize_outliers_teams(teams_df):
-    """
-    Create visualizations for outlier detection in teams dataset
-    
-    Parameters:
-    - teams_df: DataFrame with team data
-    """
     # Select key numeric columns for visualization
     key_cols = []
     potential_cols = ['won', 'lost', 'attend', 'o_pts', 'd_pts', 'o_reb', 'd_reb']
