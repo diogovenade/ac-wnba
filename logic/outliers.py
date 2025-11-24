@@ -5,32 +5,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 
-def handle_outliers(players_df):
-    # Data Quality Check: Handle extreme outliers before imputation
-    print("=== PRE-IMPUTATION DATA QUALITY CHECK ===\n")
-
-    # Check for unrealistic height values (WNBA players typically 60-80 inches)
-    unrealistic_heights = (players_df['height'] < 60) & (players_df['height'] > 0)
-    if unrealistic_heights.sum() > 0:
-        print(f"Found {unrealistic_heights.sum()} unrealistic height values (<60 inches)")
-        print("Converting to zero for proper imputation:")
-        display(players_df.loc[unrealistic_heights, ['bioID', 'height', 'weight', 'pos']])
-        players_df.loc[unrealistic_heights, 'height'] = 0
-        print("✓ Converted to zero for imputation\n")
-
-    # Check for unrealistic weight values (WNBA players typically 115-260 lbs)
-    unrealistic_weights = (players_df['weight'] < 100) & (players_df['weight'] > 0)
-    if unrealistic_weights.sum() > 0:
-        print(f"Found {unrealistic_weights.sum()} unrealistic weight values (<100 lbs)")
-        print("Converting to zero for proper imputation:")
-        display(players_df.loc[unrealistic_weights, ['bioID', 'height', 'weight', 'pos']])
-        players_df.loc[unrealistic_weights, 'weight'] = 0
-        print("✓ Converted to zero for imputation\n")
-
-    print("Pre-imputation quality check complete!")
-    return players_df
-
-
 def detect_outliers_zscore(players_df, threshold=3):
     # Select only height and weight columns with non-zero values
     numerical_cols = ['height', 'weight']
@@ -165,8 +139,6 @@ def visualize_outliers(players_df):
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.show()
-    
-    print(f"✓ Visualizations complete")
 
 # ==========================================
 # TEAMS DATASET OUTLIER DETECTION
@@ -317,8 +289,6 @@ def visualize_outliers_teams(teams_df):
             ax.grid(True, alpha=0.3)
             plt.tight_layout()
             plt.show()
-    
-    print(f"✓ Visualizations complete")
 
 def detect_outliers_zscore_players_teams(players_teams_df, threshold=3):
     """Detect outliers in players_teams dataset using Z-score method."""
@@ -465,5 +435,3 @@ def visualize_outliers_players_teams(players_teams_df):
             ax.grid(True, alpha=0.3)
             plt.tight_layout()
             plt.show()
-    
-    print(f"✓ Visualizations complete")
